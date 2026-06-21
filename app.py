@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import streamlit as st
 
@@ -44,13 +45,12 @@ else:
                 filtered_df = filtered_df[
                     filtered_df["すべての口コミ"].str.contains(kw, na=False)
                 ]
-            
+
             hit_shops = len(filtered_df)
 
             # --------------------------------------------------
             # 📊 ① 各店舗の口コミ内での出現率（密度）を計算する関数
             # --------------------------------------------------
-            # ※ 複数キーワードがある場合は、それぞれの文字数と出現回数の合計で計算します
             def calculate_multi_density(text, kw_list):
                 if pd.isna(text) or len(str(text)) == 0:
                     return 0.0
@@ -58,11 +58,10 @@ else:
                 total_kw_len_count = 0
                 for kw in kw_list:
                     count = text_str.count(kw)
-                    total_kw_len_count += (count * len(kw))
+                    total_kw_len_count += count * len(kw)
                 total_len = len(text_str)
                 return (total_kw_len_count / total_len) * 100
 
-            # 密度計算を適用して新しい列を作る
             df["キーワード密度(%)"] = df["すべての口コミ"].apply(
                 lambda t: calculate_multi_density(t, keywords)
             )
@@ -70,11 +69,33 @@ else:
                 lambda t: calculate_multi_density(t, keywords)
             )
 
-            # 表示用のキーワード文字列
+            # --------------------------------------------------
+            # 🖌️ ② キーワードを黄色いマーカーで強調する関数
+            # --------------------------------------------------
+            def highlight_keywords(text, kw_list):
+                if pd.isna(text):
+                    return ""
+                text_str = str(text)
+
+                # 改行コードをブラウザ用の <br> に変換して見やすくする
+                text_str = text_str.replace("\n", "<br>")
+
+                # 各キーワードを、背景黄色・太字のHTMLタグで挟むように置換
+                for kw in kw_list:
+                    if kw:
+                        # 特殊文字のエスケープをして安全に置換
+                        escaped_kw = re.escape(kw)
+                        text_str = re.sub(
+                            escaped_kw,
+                            f"<mark style='background-color: #ffff00; font-weight: bold;'>{kw}</mark>",
+                            text_str,
+                        )
+                return text_str
+
             display_keywords = " ＋ ".join(keywords)
 
             # --------------------------------------------------
-            # 📈 ② 全体データのサマリー表示
+            # 📈 ③ 全体データのサマリー表示
             # --------------------------------------------------
             st.header("📊 全体の出現傾向")
             if hit_shops > 0:
@@ -85,36 +106,28 @@ else:
                         value=f"{hit_shops} / {total_shops} 店舗",
                     )
                 with col2:
-                    # ヒットしたお店の中での平均密度
                     avg_density = filtered_df["キーワード密度(%)"].mean()
                     st.metric(
                         label="ヒット店舗における平均出現率（文字密度）",
                         value=f"{avg_density:.3f} %",
                     )
             else:
-                st.warning(f"「{display_keywords}」がすべて含まれる口コミは見つかりませんでした。")
+                st.warning(
+                    f"「{display_keywords}」がすべて含まれる口コミは見つかりませんでした。"
+                )
 
             # --------------------------------------------------
-            # 🗺️ ③ 地域特性（エリア別の平均出現率）
+            # 🗺️ ④ 地域特性（エリア別の平均出現率）
             # --------------------------------------------------
             st.header("🗺️ 地域特性（エリア別の平均出現率）")
             if hit_shops > 0:
-                st.write(
-                    f"各エリアの店舗の口コミ全体で、指定したキーワードが占める平均割合を算出しました（数値が高いエリアほど、口コミでの言及密度が高い特性があります）："
-                )
-
-                # エリアごとに全体の平均密度を計算
                 area_avg_density = (
                     df.groupby("検索エリア")["キーワード密度(%)"].mean().reset_index()
                 )
                 area_avg_density.columns = ["エリア", "全店舗での平均出現率(%)"]
-
-                # 出現率が高い順に並び替え
                 area_avg_density = area_avg_density.sort_values(
                     by="全店舗での平均出現率(%)", ascending=False
                 )
-
-                # パーセンテージ表記に整形
                 area_avg_density["全店舗での平均出現率(%)"] = area_avg_density[
                     "全店舗での平均出現率(%)"
                 ].map(lambda x: f"{x:.4f}%")
@@ -122,7 +135,7 @@ else:
                 st.table(area_avg_density)
 
             # --------------------------------------------------
-            # 📋 ④ 店舗ごとの詳細データ（出現率順に並び替え）
+            # 📋 ⑤ 店舗ごとの詳細データ（出現率順・キーワード強調版）
             # --------------------------------------------------
             st.header("📋 店舗別の出現率（高い順）")
             if hit_shops > 0:
@@ -133,10 +146,10 @@ else:
                 for index, row in sorted_df.iterrows():
                     text_str = str(row["すべての口コミ"])
                     total_len = len(text_str)
-                    
-                    # 各キーワードの出現回数の内訳テキストを作成
-                    counts_text = ", ".join([f"「{kw}」: {text_str.count(kw)}回" for kw in keywords])
 
+                    counts_text = ", ".join(
+                        [f"「{kw}」: {text_str.count(kw)}回" for kw in keywords]
+                    )
                     label_text = f"【出現率: {row['キーワード密度(%)']:.3f}%】 📍 {row['店名']} （{row['検索エリア']}）"
 
                     with st.expander(label_text):
@@ -148,7 +161,16 @@ else:
                         st.markdown("**【AIによる要約】**")
                         st.write(row["300文字要約"])
                         st.markdown("---")
+
                         st.markdown("**【実際の口コミ（生データ）】**")
-                        st.write(row["すべての口コミ"])
+                        # 強調処理をしたHTMLテキストを生成
+                        highlighted_text = highlight_keywords(
+                            row["すべての口コミ"], keywords
+                        )
+                        # HTMLとして安全に画面にレンダリングする
+                        st.markdown(
+                            f"<div style='background-color: #f9f9f9; padding: 15px; border-radius: 5px; line-height: 1.6;'>{highlighted_text}</div>",
+                            unsafe_allow_html=True,
+                        )
     else:
         st.info("上の検索窓にキーワードを入力すると、詳細な確率・密度分析が始まります。")
