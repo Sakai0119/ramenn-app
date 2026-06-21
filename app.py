@@ -23,39 +23,55 @@ if df is None:
     st.error("⚠️ 'ramen_database_100.csv' が見つかりません。")
 else:
     keyword_input = st.text_input(
-        "分析したいキーワードを入力してください（例：濃厚、家系、あっさり）", ""
+        "分析したいキーワードを入力してください（スペースや読点で複数指定可。例：大宮 濃厚）", ""
     )
 
     if keyword_input:
-        # スペース等で分解せず、今回は指定されたひとつの塊（フレーズ）として数えます
-        kw = keyword_input.strip()
+        # 全角スペースや読点を半角スペースに統一してリストに分解する
+        keywords = (
+            keyword_input.replace(" ", " ")
+            .replace("、", " ")
+            .replace(",", " ")
+            .split()
+        )
 
-        if kw:
+        if keywords:
             total_shops = len(df)
 
-            # キーワードが含まれるお店だけを抽出
-            filtered_df = df[df["すべての口コミ"].str.contains(kw, na=False)].copy()
+            # 1. まず入力されたすべてのキーワードが含まれるお店を絞り込む（AND検索）
+            filtered_df = df.copy()
+            for kw in keywords:
+                filtered_df = filtered_df[
+                    filtered_df["すべての口コミ"].str.contains(kw, na=False)
+                ]
+            
             hit_shops = len(filtered_df)
 
             # --------------------------------------------------
-            # 📊 ① 各店舗の口コミ内での出現率（密度）を計算
+            # 📊 ① 各店舗の口コミ内での出現率（密度）を計算する関数
             # --------------------------------------------------
-            def calculate_density(text, keyword):
+            # ※ 複数キーワードがある場合は、それぞれの文字数と出現回数の合計で計算します
+            def calculate_multi_density(text, kw_list):
                 if pd.isna(text) or len(str(text)) == 0:
                     return 0.0
                 text_str = str(text)
-                count = text_str.count(keyword)  # キーワードの登場回数
-                kw_len = len(keyword)  # キーワードの文字数
-                total_len = len(text_str)  # 全口コミの総文字数
-                return ((count * kw_len) / total_len) * 100
+                total_kw_len_count = 0
+                for kw in kw_list:
+                    count = text_str.count(kw)
+                    total_kw_len_count += (count * len(kw))
+                total_len = len(text_str)
+                return (total_kw_len_count / total_len) * 100
 
-            # 全データに対して密度を計算して新しい列を作る
+            # 密度計算を適用して新しい列を作る
             df["キーワード密度(%)"] = df["すべての口コミ"].apply(
-                lambda t: calculate_density(t, kw)
+                lambda t: calculate_multi_density(t, keywords)
             )
             filtered_df["キーワード密度(%)"] = filtered_df["すべての口コミ"].apply(
-                lambda t: calculate_density(t, kw)
+                lambda t: calculate_multi_density(t, keywords)
             )
+
+            # 表示用のキーワード文字列
+            display_keywords = " ＋ ".join(keywords)
 
             # --------------------------------------------------
             # 📈 ② 全体データのサマリー表示
@@ -65,7 +81,7 @@ else:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric(
-                        label="キーワードが出現した店舗数",
+                        label=f"「{display_keywords}」がすべて出現した店舗数",
                         value=f"{hit_shops} / {total_shops} 店舗",
                     )
                 with col2:
@@ -76,7 +92,7 @@ else:
                         value=f"{avg_density:.3f} %",
                     )
             else:
-                st.warning("該当するキーワードが含まれる口コミは見つかりませんでした。")
+                st.warning(f"「{display_keywords}」がすべて含まれる口コミは見つかりませんでした。")
 
             # --------------------------------------------------
             # 🗺️ ③ 地域特性（エリア別の平均出現率）
@@ -84,10 +100,10 @@ else:
             st.header("🗺️ 地域特性（エリア別の平均出現率）")
             if hit_shops > 0:
                 st.write(
-                    f"各エリアの店舗の口コミ全体で、「{kw}」が占める平均割合を算出しました："
+                    f"各エリアの店舗の口コミ全体で、指定したキーワードが占める平均割合を算出しました（数値が高いエリアほど、口コミでの言及密度が高い特性があります）："
                 )
 
-                # エリアごとに「キーワード密度(%)」の平均を計算（全店舗を対象にすることで地域特性を見る）
+                # エリアごとに全体の平均密度を計算
                 area_avg_density = (
                     df.groupby("検索エリア")["キーワード密度(%)"].mean().reset_index()
                 )
@@ -98,7 +114,7 @@ else:
                     by="全店舗での平均出現率(%)", ascending=False
                 )
 
-                # 表示用に小数点を綺麗に整形
+                # パーセンテージ表記に整形
                 area_avg_density["全店舗での平均出現率(%)"] = area_avg_density[
                     "全店舗での平均出現率(%)"
                 ].map(lambda x: f"{x:.4f}%")
@@ -110,24 +126,27 @@ else:
             # --------------------------------------------------
             st.header("📋 店舗別の出現率（高い順）")
             if hit_shops > 0:
-                # 出現率（密度）が高い順にお店を並び替える
                 sorted_df = filtered_df.sort_values(
                     by="キーワード密度(%)", ascending=False
                 )
 
                 for index, row in sorted_df.iterrows():
-                    # 各お店の総文字数と出現回数を計算（表示用）
                     text_str = str(row["すべての口コミ"])
-                    count = text_str.count(kw)
                     total_len = len(text_str)
+                    
+                    # 各キーワードの出現回数の内訳テキストを作成
+                    counts_text = ", ".join([f"「{kw}」: {text_str.count(kw)}回" for kw in keywords])
 
                     label_text = f"【出現率: {row['キーワード密度(%)']:.3f}%】 📍 {row['店名']} （{row['検索エリア']}）"
 
                     with st.expander(label_text):
                         st.caption(f"住所: {row['住所']}")
                         st.write(
-                            f"💡 **統計データ:** 口コミ総文字数 {total_len}文字 中、キーワード 「{kw}」 が **{count}回** 登場しています。"
+                            f"💡 **統計データ:** 口コミ総文字数 {total_len}文字 中、{counts_text} 登場しています。"
                         )
+                        st.markdown("---")
+                        st.markdown("**【AIによる要約】**")
+                        st.write(row["300文字要約"])
                         st.markdown("---")
                         st.markdown("**【実際の口コミ（生データ）】**")
                         st.write(row["すべての口コミ"])
