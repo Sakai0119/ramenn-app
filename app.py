@@ -130,7 +130,7 @@ else:
                 st.table(area_avg_density)
 
             # --------------------------------------------------
-            # 📋 ⑤ 店舗ごとの詳細データ（表示エラー完全対策版）
+            # 📋 ⑤ 店舗ごとの詳細データ
             # --------------------------------------------------
             st.header("📋 店舗別の出現率（高い順）")
             if hit_shops > 0:
@@ -162,7 +162,7 @@ else:
                             row["すべての口コミ"], keywords
                         )
 
-                        # ★表示バグ対策： st.components.v1.html を使い、完全に独立した白い安全な枠として口コミを出力します
+                        # HTMLの枠組み。はみ出た文字は自動でスクロールできるようにCSSを設定
                         html_box = f"""
                         <div style="
                             background-color: #ffffff; 
@@ -173,11 +173,13 @@ else:
                             font-size: 14px;
                             font-family: sans-serif;
                             border: 1px solid #dddddd;
+                            height: 300px;
+                            overflow-y: auto;
                         ">
                             {highlighted_text}
                         </div>
                         """
-                        # 文字列のエラー（%誤認など）を100%回避する安全なコンポーネントで描画
-                        st.components.v1.html(html_box, height=350, scroller=True)
+                        # scrolling=True に修正してエラーを回避
+                        st.components.v1.html(html_box, height=330, scrolling=True)
     else:
         st.info("上の検索窓にキーワードを入力すると、詳細な確率・密度分析が始まります。")
