@@ -28,18 +28,18 @@ else:
     )
 
     if keyword_input:
-        # 全角スペースや読点を半角スペースに統一してリストに分解する
-        keywords = (
+        # 読点（、 ,）や全角スペースをすべて半角スペースに変えてから分解
+        cleaned_input = (
             keyword_input.replace(" ", " ")
             .replace("、", " ")
             .replace(",", " ")
-            .split()
         )
+        keywords = cleaned_input.split()
 
         if keywords:
             total_shops = len(df)
 
-            # 1. まず入力されたすべてのキーワードが含まれるお店を絞り込む（AND検索）
+            # 1. 入力されたすべてのキーワードが含まれるお店を絞り込む（AND検索）
             filtered_df = df.copy()
             for kw in keywords:
                 filtered_df = filtered_df[
@@ -70,24 +70,23 @@ else:
             )
 
             # --------------------------------------------------
-            # 🖌️ ② キーワードを黄色いマーカーで強調する関数
+            # 🖌️ ② キーワードをオシャレに強調する関数（白飛び・ダークモード対策）
             # --------------------------------------------------
             def highlight_keywords(text, kw_list):
                 if pd.isna(text):
                     return ""
                 text_str = str(text)
 
-                # 改行コードをブラウザ用の <br> に変換して見やすくする
+                # 改行コードをブラウザ用の <br> に変換
                 text_str = text_str.replace("\n", "<br>")
 
-                # 各キーワードを、背景黄色・太字のHTMLタグで挟むように置換
+                # 各キーワードを、目に優しい薄オレンジのマーカーで挟む（文字色は黒で固定）
                 for kw in kw_list:
                     if kw:
-                        # 特殊文字のエスケープをして安全に置換
                         escaped_kw = re.escape(kw)
                         text_str = re.sub(
                             escaped_kw,
-                            f"<mark style='background-color: #ffff00; font-weight: bold;'>{kw}</mark>",
+                            f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold; border-radius: 3px; padding: 0 2px;'>{kw}</mark>",
                             text_str,
                         )
                 return text_str
@@ -135,7 +134,7 @@ else:
                 st.table(area_avg_density)
 
             # --------------------------------------------------
-            # 📋 ⑤ 店舗ごとの詳細データ（出現率順・キーワード強調版）
+            # 📋 ⑤ 店舗ごとの詳細データ（完全に見やすさ重視版）
             # --------------------------------------------------
             st.header("📋 店舗別の出現率（高い順）")
             if hit_shops > 0:
@@ -163,14 +162,8 @@ else:
                         st.markdown("---")
 
                         st.markdown("**【実際の口コミ（生データ）】**")
-                        # 強調処理をしたHTMLテキストを生成
                         highlighted_text = highlight_keywords(
                             row["すべての口コミ"], keywords
                         )
-                        # HTMLとして安全に画面にレンダリングする
-                        st.markdown(
-                            f"<div style='background-color: #f9f9f9; padding: 15px; border-radius: 5px; line-height: 1.6;'>{highlighted_text}</div>",
-                            unsafe_allow_html=True,
-                        )
-    else:
-        st.info("上の検索窓にキーワードを入力すると、詳細な確率・密度分析が始まります。")
+
+                        # ★対策：背景を「完全に固定された白（#ffffff）」にし、文字色を「濃い
