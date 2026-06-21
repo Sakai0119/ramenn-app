@@ -28,7 +28,6 @@ else:
     )
 
     if keyword_input:
-        # 読点（、 ,）や全角スペースをすべて半角スペースに変えてから分解
         cleaned_input = (
             keyword_input.replace(" ", " ")
             .replace("、", " ")
@@ -39,7 +38,7 @@ else:
         if keywords:
             total_shops = len(df)
 
-            # 1. 入力されたすべてのキーワードが含まれるお店を絞り込む（AND検索）
+            # 1. AND検索で店舗を絞り込み
             filtered_df = df.copy()
             for kw in keywords:
                 filtered_df = filtered_df[
@@ -49,7 +48,7 @@ else:
             hit_shops = len(filtered_df)
 
             # --------------------------------------------------
-            # 📊 ① 各店舗の口コミ内での出現率（密度）を計算する関数
+            # 📊 ① 密度計算
             # --------------------------------------------------
             def calculate_multi_density(text, kw_list):
                 if pd.isna(text) or len(str(text)) == 0:
@@ -70,17 +69,14 @@ else:
             )
 
             # --------------------------------------------------
-            # 🖌️ ② キーワードをオシャレに強調する関数（白飛び・ダークモード対策）
+            # 🖌️ ② キーワードのハイライト処理
             # --------------------------------------------------
             def highlight_keywords(text, kw_list):
                 if pd.isna(text):
                     return ""
                 text_str = str(text)
-
-                # 改行コードをブラウザ用の <br> に変換
                 text_str = text_str.replace("\n", "<br>")
 
-                # 各キーワードを、目に優しい薄オレンジのマーカーで挟む（文字色は黒で固定）
                 for kw in kw_list:
                     if kw:
                         escaped_kw = re.escape(kw)
@@ -94,7 +90,7 @@ else:
             display_keywords = " ＋ ".join(keywords)
 
             # --------------------------------------------------
-            # 📈 ③ 全体データのサマリー表示
+            # 📈 ③ 全体の出現傾向
             # --------------------------------------------------
             st.header("📊 全体の出現傾向")
             if hit_shops > 0:
@@ -116,7 +112,7 @@ else:
                 )
 
             # --------------------------------------------------
-            # 🗺️ ④ 地域特性（エリア別の平均出現率）
+            # 🗺️ ④ 地域特性
             # --------------------------------------------------
             st.header("🗺️ 地域特性（エリア別の平均出現率）")
             if hit_shops > 0:
@@ -134,7 +130,7 @@ else:
                 st.table(area_avg_density)
 
             # --------------------------------------------------
-            # 📋 ⑤ 店舗ごとの詳細データ（完全に見やすさ重視版）
+            # 📋 ⑤ 店舗ごとの詳細データ（表示エラー完全対策版）
             # --------------------------------------------------
             st.header("📋 店舗別の出現率（高い順）")
             if hit_shops > 0:
@@ -166,4 +162,22 @@ else:
                             row["すべての口コミ"], keywords
                         )
 
-                        # ★対策：背景を「完全に固定された白（#ffffff）」にし、文字色を「濃い
+                        # ★表示バグ対策： st.components.v1.html を使い、完全に独立した白い安全な枠として口コミを出力します
+                        html_box = f"""
+                        <div style="
+                            background-color: #ffffff; 
+                            color: #222222; 
+                            padding: 15px; 
+                            border-radius: 8px; 
+                            line-height: 1.7; 
+                            font-size: 14px;
+                            font-family: sans-serif;
+                            border: 1px solid #dddddd;
+                        ">
+                            {highlighted_text}
+                        </div>
+                        """
+                        # 文字列のエラー（%誤認など）を100%回避する安全なコンポーネントで描画
+                        st.components.v1.html(html_box, height=350, scroller=True)
+    else:
+        st.info("上の検索窓にキーワードを入力すると、詳細な確率・密度分析が始まります。")
