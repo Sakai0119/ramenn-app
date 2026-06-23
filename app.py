@@ -1,5 +1,5 @@
 import re
-import openai
+from openai import OpenAI  # 💡 最新の読み込み方に変更
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -12,10 +12,12 @@ st.title("🍜 習志野・船橋 ラーメン網羅分析＆マッピング")
 st.write("習志野市と船橋市のラーメン店を完全網羅し、口コミから算出した「おいしさ熱量スコア」と「具体的な金額」で地域特性を比較します。")
 
 # ==================================================
-# 🔑 OpenAI APIキーの設定（Streamlit Secretsから取得）
+# 🔑 OpenAI クライアントの初期化（最新仕様）
 # ==================================================
+client = None
 if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
-    openai.api_key = st.secrets["openai"]["api_key"]
+    # 💡 クライアントオブジェクトを作ってキーを渡す形に変更
+    client = OpenAI(api_key=st.secrets["openai"]["api_key"])
 else:
     st.warning("⚠️ OpenAIのAPIキーが設定されていません。StreamlitのSecretsに設定してください。")
 
@@ -51,27 +53,27 @@ else:
         adjusted_score = min(100.0, max(30.0, 30.0 + raw_score * 10))
         return round(adjusted_score, 1)
 
-    # 💡 ChatGPTのAPIを使って300字の高品質な要約を生成する関数
+    # 💡 最新のAPIの叩き方に修正した要約関数
     @st.cache_data(show_spinner=False)
     def generate_gpt_summary(shop_name, text, kw_list):
-        if not openai.api_key:
+        if client is None:
             return "（APIキーが設定されていないため要約をスキップしました）"
         if pd.isna(text) or len(str(text).strip()) == 0:
             return "口コミデータがありません。"
         
         keywords_str = "、".join(kw_list)
         try:
-            # gpt-4o-mini を使用（高速かつ非常に低コスト）
-            response = openai.ChatCompletion.create(
+            # 💡 client.chat.completions.create を使う最新の書き方に修正
+            response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "あなたは優秀なグルメレビュアーです。提供されたラーメン店の口コミ群から、そのお店の味、特徴、雰囲気を客観的に分析し、300文字程度（最大320文字）の綺麗な日本語の要約文を作成してください。"},
-                    {"role": "user", "content": f"店舗名: {shop_name}\n特に注目してほしい検索キーワード: {keywords_str}\n\n口コミデータ:\n{str(text)[:2000]}"} # 文字数制限対策で先頭2000文字を送信
+                    {"role": "user", "content": f"店舗名: {shop_name}\n特に注目してほしい検索キーワード: {keywords_str}\n\n口コミデータ:\n{str(text)[:2000]}"}
                 ],
                 max_tokens=400,
                 temperature=0.7
             )
-            return response.choices[0].message['content'].strip()
+            return response.choices[0].message.content.strip()  # 💡 dict形式からプロパティ形式へアクセス方法を変更
         except Exception as e:
             return f"❌ 要約生成エラー: {e}"
 
@@ -172,11 +174,9 @@ else:
                         st.caption(f"住所: {row['住所']}")
                         st.write(f"💰 **価格:** {row['価格']} 円")
                         
-                        # 💡 ChatGPTのAPIを呼び出して超高品質な300字要約を生成（初回のみ通信され、キャッシュされます）
                         with st.spinner("AIが口コミを分析して要約中..."):
                             raw_summary = generate_gpt_summary(row["店名"], row["すべての口コミ"], keywords)
                         
-                        # 要約文のキーワードをハイライト
                         highlighted_summary = raw_summary
                         for kw in keywords:
                             highlighted_summary = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", highlighted_summary)
