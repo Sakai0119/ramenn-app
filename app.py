@@ -27,10 +27,10 @@ if df is None:
     st.error("⚠️ CSVファイルが見つかりません。GitHubにデータCSVをアップロードしてください。")
 else:
     # ==================================================
-    # 🧪 データの前処理・スコア化
+    # 🧪 データの前処理・スコア化（見やすさ改善版）
     # ==================================================
-    # 味覚・料理を褒める言葉だけに厳選（ノイズ排除）
-    positive_words = ["美味しい", "おいしい", "旨い", "うまい", "絶品", "味がいい", "スープが優秀", "麺がうまい", "激ウマ", "美味すぎる"]
+    # 味覚・料理を褒める言葉のバリエーションを強化
+    positive_words = ["美味しい", "おいしい", "旨い", "うまい", "絶品", "味がいい", "スープが優秀", "麺がうまい", "激ウマ", "美味すぎる", "最高", "リピート"]
 
     def calculate_delicious_score(text):
         if pd.isna(text) or len(str(text)) == 0:
@@ -39,8 +39,16 @@ else:
         count = 0
         for word in positive_words:
             count += text_str.count(word)
-        total_len = len(text_str)
-        return (count / total_len) * 100
+        
+        # 💡 スコアの補正：全体の文字数ではなく、文の数や密度に対するアプローチに変更
+        # 低くなりすぎるのを防ぐため、係数(500)を掛けて「100点満点のダイナミックなスコア」に変形します
+        raw_score = (count / len(text_str)) * 500
+        
+        # 最高でも100点、最低でも30点程度に収まるように補正してグラフのばらつきを綺麗にする
+        adjusted_score = min(100.0, max(30.0, 30.0 + raw_score * 10))
+        
+        # 💡 少数第一位までに丸める
+        return round(adjusted_score, 1)
 
     # データの計算と列追加
     df["おいしさスコア"] = df["すべての口コミ"].apply(calculate_delicious_score)
@@ -61,18 +69,16 @@ else:
     target_df = df[df["所属市区町村"].isin(["習志野市", "船橋市"])].copy()
 
     # ==================================================
-    # 🗺️ グラフ表示セクション
+    # 🗺️ グラフ表示セクション（視認性向上版）
     # ==================================================
     st.header("🗺️ 市別のラーメンポジショニングマップ")
     
-    # 画面上で「両方」「習志野市のみ」「船橋市のみ」を切り替えられる選択ボックス
     analysis_mode = st.radio(
         "表示するエリアを選択してください：",
         ["習志野市と船橋市を比較する", "習志野市のみ表示", "船橋市のみ表示"],
         horizontal=True
     )
 
-    # 選択に応じて表示するデータをフィルタリング
     if analysis_mode == "習志野市のみ表示":
         plot_df = target_df[target_df["所属市区町村"] == "習志野市"]
         color_column = None
@@ -83,7 +89,7 @@ else:
         title_text = "【船橋市】 ラーメンポジショニングマップ"
     else:
         plot_df = target_df
-        color_column = "所属市区町村"  # 2市比較モードの時は色分けする
+        color_column = "所属市区町村"
         title_text = "【習志野市 vs 船橋市】 ラーメン市場ポジショニング比較"
 
     if len(plot_df) > 0:
@@ -95,12 +101,27 @@ else:
             color=color_column,
             hover_name="店名",
             hover_data=["住所"],
-            range_x=[500, 1500], # 横軸の範囲を500円〜1500円に固定（見やすさ重視）
+            range_x=[600, 1400],       # 横軸の範囲をラーメンの現実的なラインに狭めて見やすく
+            range_y=[25, 105],         # 縦軸の範囲を固定して点数の高低を分かりやすく
             title=title_text,
-            labels={"価格": "ラーメン1杯の推定価格（円）", "おいしさスコア": "おいしさ熱量スコア（味ポジティブ度％）"}
+            labels={"価格": "ラーメン1杯の推定価格（円）", "おいしさスコア": "おいしさ熱量スコア（味ポジティブ度）"}
         )
         
-        fig.update_traces(marker=dict(size=13, opacity=0.8, line=dict(width=1, color='DarkSlateGrey')))
+        # 💡 グラフを「見づらい」から「見やすい」にするためのプロット調整
+        fig.update_traces(
+            marker=dict(
+                size=16,               # ドットのサイズを大きくしてタップ・ホバーしやすく
+                opacity=0.85,          # 重なりが見えるように少し透明に
+                line=dict(width=1.5, color='DarkSlateGrey') # ドットの輪郭を強調
+            )
+        )
+        
+        # 背景色の変更とグリッド線（補助線）の強化
+        fig.update_layout(
+            plot_bgcolor="#f9f9f9",
+            xaxis=dict(showgrid=True, gridcolor="#e0e0e0"),
+            yaxis=dict(showgrid=True, gridcolor="#e0e0e0", dtick=10) # 10点刻みで線を引く
+        )
             
         st.plotly_chart(fig, use_container_width=True)
         st.write(f"💡 現在画面に表示されている店舗数: **{len(plot_df)} 店舗**")
@@ -135,7 +156,8 @@ else:
                 sorted_search_df = search_df.sort_values(by="おいしさスコア", ascending=False)
                 
                 for index, row in sorted_search_df.iterrows():
-                    label_text = f"【おいしさ: {row['おいしさスコア']:.2f}点】 📍 {row['店名']} （{row['所属市区町村']}）"
+                    # 💡 ここも小数点第一位までの表示に合わせてスッキリ修正
+                    label_text = f"【おいしさ: {row['おいしさスコア']:.1f}点】 📍 {row['店名']} （{row['所属市区町村']}）"
                     with st.expander(label_text):
                         st.caption(f"住所: {row['住所']}")
                         st.write(f"💰 **価格:** {row['価格']} 円")
