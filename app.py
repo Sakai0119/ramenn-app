@@ -1,4 +1,5 @@
 import re
+import openai
 import pandas as pd
 import streamlit as st
 import plotly.express as px
@@ -9,6 +10,14 @@ st.set_page_config(
 
 st.title("🍜 習志野・船橋 ラーメン網羅分析＆マッピング")
 st.write("習志野市と船橋市のラーメン店を完全網羅し、口コミから算出した「おいしさ熱量スコア」と「具体的な金額」で地域特性を比較します。")
+
+# ==================================================
+# 🔑 OpenAI APIキーの設定（Streamlit Secretsから取得）
+# ==================================================
+if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
+    openai.api_key = st.secrets["openai"]["api_key"]
+else:
+    st.warning("⚠️ OpenAIのAPIキーが設定されていません。StreamlitのSecretsに設定してください。")
 
 
 @st.cache_data
@@ -42,45 +51,32 @@ else:
         adjusted_score = min(100.0, max(30.0, 30.0 + raw_score * 10))
         return round(adjusted_score, 1)
 
-    # 💡 補助関数：生の口コミから、検索ワードを含む重要な1文を抜き出して300字以内の要約を自動生成する
-    def generate_auto_summary(text, kw_list):
-        if pd.isna(text) or len(str(text)) == 0:
-            return "口コミがありません。"
+    # 💡 ChatGPTのAPIを使って300字の高品質な要約を生成する関数
+    @st.cache_data(show_spinner=False)
+    def generate_gpt_summary(shop_name, text, kw_list):
+        if not openai.api_key:
+            return "（APIキーが設定されていないため要約をスキップしました）"
+        if pd.isna(text) or len(str(text).strip()) == 0:
+            return "口コミデータがありません。"
         
-        text_str = str(text).replace("\n", " ")
-        # 文ごとにバラす（「。」「！」で区切る）
-        sentences = re.split(r'(?<=[。！?])\s*', text_str)
-        
-        summary_sentences = []
-        current_len = 0
-        
-        # まずは検索キーワードが含まれる重要な文章を優先してピックアップ
-        for s in sentences:
-            if any(kw in s for kw in kw_list) and s not in summary_sentences:
-                if current_len + len(s) < 260:  # 余裕を持って文字数を制御
-                    summary_sentences.append(s)
-                    current_len += len(s)
-        
-        # キーワード入りの文だけだと短い場合、先頭の口コミから文章を補う
-        if current_len < 100:
-            for s in sentences:
-                if s not in summary_sentences:
-                    if current_len + len(s) < 280:
-                        summary_sentences.append(s)
-                        current_len += len(s)
-                    else:
-                        break
-                        
-        summary_text = "".join(summary_sentences)
-        if len(summary_text) > 300:
-            summary_text = summary_text[:297] + "..."
-            
-        return summary_text if summary_text else text_str[:250] + "..."
+        keywords_str = "、".join(kw_list)
+        try:
+            # gpt-4o-mini を使用（高速かつ非常に低コスト）
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "あなたは優秀なグルメレビュアーです。提供されたラーメン店の口コミ群から、そのお店の味、特徴、雰囲気を客観的に分析し、300文字程度（最大320文字）の綺麗な日本語の要約文を作成してください。"},
+                    {"role": "user", "content": f"店舗名: {shop_name}\n特に注目してほしい検索キーワード: {keywords_str}\n\n口コミデータ:\n{str(text)[:2000]}"} # 文字数制限対策で先頭2000文字を送信
+                ],
+                max_tokens=400,
+                temperature=0.7
+            )
+            return response.choices[0].message['content'].strip()
+        except Exception as e:
+            return f"❌ 要約生成エラー: {e}"
 
-    # スコア列の追加
     df["おいしさスコア"] = df["すべての口コミ"].apply(calculate_delicious_score)
     
-    # 住所から所属市を判別
     def detect_city(address):
         address_str = str(address)
         if "習志野" in address_str:
@@ -131,14 +127,7 @@ else:
             labels={"価格": "ラーメン1杯の推定価格（円）", "おいしさスコア": "おいしさ熱量スコア（味ポジティブ度）"}
         )
         
-        fig.update_traces(
-            marker=dict(
-                size=16,               
-                opacity=0.85,          
-                line=dict(width=1.5, color='DarkSlateGrey') 
-            )
-        )
-        
+        fig.update_traces(marker=dict(size=16, opacity=0.85, line=dict(width=1.5, color='DarkSlateGrey')))
         fig.update_layout(
             plot_bgcolor="#f9f9f9",
             xaxis=dict(showgrid=True, gridcolor="#e0e0e0"),
@@ -153,7 +142,7 @@ else:
     st.markdown("---")
 
     # ==================================================
-    # 🔍 キーワード検索・店舗一覧（要約＆強調強化）
+    # 🔍 キーワード検索・店舗一覧
     # ==================================================
     st.header("🔍 特定キーワードの密度・口コミ検索")
     keyword_input = st.text_input("調べたい特徴を入力（例：津田沼 濃厚、家系）", "")
@@ -183,23 +172,22 @@ else:
                         st.caption(f"住所: {row['住所']}")
                         st.write(f"💰 **価格:** {row['価格']} 円")
                         
-                        # 💡 検索ワードをベースに「その場で300字要約」を動的生成
-                        raw_summary = generate_auto_summary(row["すべての口コミ"], keywords)
+                        # 💡 ChatGPTのAPIを呼び出して超高品質な300字要約を生成（初回のみ通信され、キャッシュされます）
+                        with st.spinner("AIが口コミを分析して要約中..."):
+                            raw_summary = generate_gpt_summary(row["店名"], row["すべての口コミ"], keywords)
                         
-                        # 要約文のキーワードもハイライト
+                        # 要約文のキーワードをハイライト
                         highlighted_summary = raw_summary
                         for kw in keywords:
                             highlighted_summary = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", highlighted_summary)
                             
                         st.markdown("---")
-                        st.markdown("**📝 【300字特徴要約（検索キーワード優先抽出）】**")
-                        # HTMLコンポーネントを使って要約のマーカーを綺麗に描画
-                        st.components.v1.html(f"<div style='color: #333333; font-size: 14px; line-height: 1.6; font-family: sans-serif;'>{highlighted_summary}</div>", height=90)
+                        st.markdown("**📝 【ChatGPTによる300字AI特徴要約】**")
+                        st.components.v1.html(f"<div style='color: #333333; font-size: 14px; line-height: 1.6; font-family: sans-serif;'>{highlighted_summary}</div>", height=120, scrolling=True)
                         
                         st.markdown("---")
                         st.markdown("**📜 【実際の口コミ（生データ・キーワード強調）】**")
                         
-                        # 生の口コミのハイライト
                         text_str = str(row["すべての口コミ"]).replace("\n", "<br>")
                         for kw in keywords:
                             text_str = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", text_str)
