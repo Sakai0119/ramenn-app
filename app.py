@@ -89,4 +89,135 @@ else:
     target_df = df[df["所属市区町村"].isin(["習志野市", "船橋市"])].copy()
 
     # ==================================================
-    # 🗺️ グラフ表示
+    # 🗺️ グラフ表示セクション
+    # ==================================================
+    st.header("🗺️ 市別のラーメンポジショニングマップ")
+    
+    analysis_mode = st.radio(
+        "表示するエリアを選択してください：",
+        ["習志野市と船橋市を比較する", "習志野市のみ表示", "船橋市のみ表示"],
+        horizontal=True
+    )
+
+    if analysis_mode == "習志野市のみ表示":
+        plot_df = target_df[target_df["所属市区町村"] == "習志野市"]
+        color_column = None
+        title_text = "【習志野市】 ラーメンポジショニングマップ"
+    elif analysis_mode == "船橋市のみ表示":
+        plot_df = target_df[target_df["所属市区町村"] == "船橋市"]
+        color_column = None
+        title_text = "【船橋市】 ラーメンポジショニングマップ"
+    else:
+        plot_df = target_df
+        color_column = "所属市区町村"
+        title_text = "【習志野市 vs 船橋市】 ラーメン市場ポジショニング比較"
+
+    if len(plot_df) > 0:
+        fig = px.scatter(
+            plot_df,
+            x="価格",           
+            y="おいしさスコア",
+            color=color_column,
+            hover_name="店名",
+            hover_data=["住所"],
+            range_x=[600, 1400],       
+            range_y=[25, 105],         
+            title=title_text,
+            labels={"価格": "ラーメン1杯の推定価格（円）", "おいしさスコア": "おいしさ熱量スコア（味ポジティブ度）"}
+        )
+        
+        fig.update_traces(marker=dict(size=16, opacity=0.85, line=dict(width=1.5, color='DarkSlateGrey')))
+        fig.update_layout(
+            plot_bgcolor="#f9f9f9",
+            xaxis=dict(showgrid=True, gridcolor="#e0e0e0"),
+            yaxis=dict(showgrid=True, gridcolor="#e0e0e0", dtick=10) 
+        )
+            
+        st.plotly_chart(fig, use_container_width=True)
+        st.write(f"💡 現在画面に表示されている店舗数: **{len(plot_df)} 店舗**")
+    else:
+        st.warning("選択されたエリアのデータがCSV内に見つかりませんでした。")
+
+    st.markdown("---")
+
+    # ==================================================
+    # 🔍 キーワード検索・店舗一覧
+    # ==================================================
+    st.header("🔍 特定キーワードの密度・口コミ検索")
+    keyword_input = st.text_input("調べたい特徴を入力（例：津田沼 濃厚、家系）", "")
+
+    if keyword_input:
+        cleaned_input = keyword_input.replace(" ", " ").replace("、", " ").replace(",", " ")
+        keywords = cleaned_input.split()
+
+        if keywords:
+            search_df = plot_df.copy()
+            for kw in keywords:
+                search_df = search_df[search_df["すべての口コミ"].str.contains(kw, na=False)]
+
+            hit_shops = len(search_df)
+            display_keywords = " ＋ ".join(keywords)
+
+            st.subheader(f"📊 「{display_keywords}」の出現傾向")
+            if hit_shops > 0:
+                st.info(f"選択中のエリア内で **{hit_shops} 店舗** がヒットしました。")
+                
+                sorted_search_df = search_df.sort_values(by="おいしさスコア", ascending=False)
+                
+                for index, row in sorted_search_df.iterrows():
+                    label_text = f"【おいしさ: {row['おいしさスコア']:.1f}点】 📍 {row['店名']} （{row['所属市区町村']}）"
+                    
+                    with st.expander(label_text):
+                        st.caption(f"住所: {row['住所']}")
+                        st.write(f"💰 **価格:** {row['価格']} 円")
+                        
+                        # ChatGPTによる300字要約
+                        with st.spinner("AIが口コミを分析して要約中..."):
+                            raw_summary = generate_gpt_summary(row["店名"], row["すべての口コミ"], keywords)
+                        
+                        highlighted_summary = raw_summary
+                        for kw in keywords:
+                            highlighted_summary = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", highlighted_summary)
+                            
+                        st.markdown("---")
+                        st.markdown("**📝 【ChatGPTによる300字AI特徴要約】**")
+                        st.components.v1.html(f"<div style='color: #333333; font-size: 14px; line-height: 1.6; font-family: sans-serif;'>{highlighted_summary}</div>", height=120, scrolling=True)
+                        
+                        st.markdown("---")
+                        st.markdown("**📜 【実際の口コミ（1件ずつ個別に表示・キーワード強調）】**")
+                        
+                        # 💡 改行コードで文章を分割して、1件ずつのリストにする処理を追加
+                        raw_reviews = str(row["すべての口コミ"]).split("\n")
+                        # 空白の行は除外して、有効な口コミだけを絞り込む
+                        clean_reviews = [r.strip() for r in raw_reviews if r.strip()]
+                        
+                        # 各口コミを吹き出し風のHTMLボックスに変形して合体させる
+                        html_reviews_list = []
+                        for idx, review in enumerate(clean_reviews):
+                            # キーワード強調処理
+                            highlighted_review = review
+                            for kw in keywords:
+                                highlighted_review = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", highlighted_review)
+                            
+                            # 1件ごとの枠のHTMLスタイルを設定
+                            box_html = f"""
+                            <div style="background-color: #f7f9fa; border-left: 5px solid #ff9800; padding: 12px; margin-bottom: 12px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); color: #333333; line-height: 1.6;">
+                                <span style="font-size: 11px; color: #888888; font-weight: bold; display: block; margin-bottom: 4px;">👤 口コミユーザー {idx+1}</span>
+                                {highlighted_review}
+                            </div>
+                            """
+                            html_reviews_list.append(box_html)
+                        
+                        # すべての口コミボックスを統合
+                        all_boxes_html = "".join(html_reviews_list)
+                        
+                        # スクロール可能な大枠の中に入れる
+                        html_container = f"""
+                        <div style="background-color: #ffffff; padding: 10px; border: 1px solid #dddddd; border-radius: 8px; height: 300px; overflow-y: auto; font-family: sans-serif; font-size: 13.5px;">
+                            {all_boxes_html}
+                        </div>
+                        """
+                        # 表示枠の高さを少し広げて（230px→330px）見やすく調整
+                        st.components.v1.html(html_container, height=330, scrolling=True)
+            else:
+                st.warning("該当する店舗は見つかりませんでした。")
