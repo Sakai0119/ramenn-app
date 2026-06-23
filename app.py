@@ -135,7 +135,7 @@ else:
                 sorted_search_df = search_df.sort_values(by="おいしさスコア", ascending=False)
                 
                 for index, row in sorted_search_df.iterrows():
-                    label_text = f"【おいしさ: {row['おいしさスコ2f']}点】 📍 {row['店名']} （{row['所属市区町村']}）"
+                    label_text = f"【おいしさ: {row['おいしさスコア']:.2f}点】 📍 {row['店名']} （{row['所属市区町村']}）"
                     with st.expander(label_text):
                         st.caption(f"住所: {row['住所']}")
                         st.write(f"💰 **価格:** {row['価格']} 円")
