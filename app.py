@@ -221,3 +221,40 @@ else:
                         st.components.v1.html(html_container, height=330, scrolling=True)
             else:
                 st.warning("該当する店舗は見つかりませんでした。")
+# 💡 app.py の下部に追加する「学生街ラーメンの特性割合分析」
+st.header("📊 千葉・学生街ラーメンの3要素割合分析")
+st.write("大学・専門学校の半径500m圏内にある店舗の『一番人気メニュー』をAIが分析した統計データです。")
+
+try:
+    univ_df = pd.read_csv("chiba_univ_ramen.csv")
+    total_univ_shops = len(univ_df)
+    
+    st.info(f"🎓 対象の学校周辺でヒットした合計ラーメン店舗数: **{total_univ_shops} 店舗**")
+
+    if total_univ_shops > 0:
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.subheader("💧 味の濃さの割合")
+            # 味の濃さの出現数をカウントしてパーセンテージ化
+            density_counts = univ_df["味の濃さ"].value_counts().reset_index()
+            density_counts.columns = ["味の濃さ", "店舗数"]
+            fig1 = px.pie(density_counts, values="店舗数", names="味の濃さ", hole=0.3, color_discrete_sequence=px.colors.sequential.RdBu)
+            st.plotly_chart(fig1, use_container_width=True)
+
+        with col2:
+            st.subheader("🍜 ラーメン種類の割合")
+            type_counts = univ_df["種類"].value_counts().reset_index()
+            type_counts.columns = ["種類", "店舗数"]
+            fig2 = px.pie(type_counts, values="店舗数", names="種類", hole=0.3, color_discrete_sequence=px.colors.sequential.Agsunset)
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with col3:
+            st.subheader("🥢 麺の太さの割合")
+            thickness_counts = univ_df["麺の太さ"].value_counts().reset_index()
+            thickness_counts.columns = ["麺の太さ", "店舗数"]
+            fig3 = px.pie(thickness_counts, values="店舗数", names="麺の太さ", hole=0.3, color_discrete_sequence=px.colors.sequential.YlOrBr)
+            st.plotly_chart(fig3, use_container_width=True)
+            
+except FileNotFoundError:
+    st.warning("⚠️ 'chiba_univ_ramen.csv' がまだリポジトリ内にありません。Colabで生成したデータをアップロードしてください。")
