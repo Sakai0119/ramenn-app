@@ -1,260 +1,63 @@
-import re
-from openai import OpenAI
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 
 st.set_page_config(
-    page_title="習志野・船橋 ラーメン特化分析アプリ", page_icon="🍜", layout="centered"
+    page_title="千葉県 学生街ラーメン特性分析アプリ", page_icon="🍜", layout="centered"
 )
 
-st.title("🍜 習志野・船橋 ラーメン網羅分析＆マッピング")
-st.write("習志野市と船橋市のラーメン店を完全網羅し、口コミから算出した「おいしさ熱量スコア」と「具体的な金額」で地域特性を比較します。")
+st.title("🍜 千葉県 学生街ラーメン網羅分析ダッシュボード")
+st.write("千葉県内の大学・専門学校・短期大学の周辺500m圏内にあるラーメン専門店を対象に、AIが分析した統計データを可視化します。")
 
 # ==================================================
-# 🔑 OpenAI クライアントの初期化
+# 📊 学生街分析セクション
 # ==================================================
-client = None
-if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
-    client = OpenAI(api_key=st.secrets["openai"]["api_key"])
-else:
-    st.warning("⚠️ OpenAIのAPIキーが設定されていません。StreamlitのSecretsに設定してください。")
-
-
-@st.cache_data
-def load_data():
-    for filename in ["ramen_database_kanto.csv", "ramen_database_massive.csv", "ramen_database_100.csv"]:
-        try:
-            return pd.read_csv(filename)
-        except FileNotFoundError:
-            continue
-    return None
-
-
-df = load_data()
-
-if df is None:
-    st.error("⚠️ CSVファイルが見つかりません。GitHubにデータCSVをアップロードしてください。")
-else:
-    # ==================================================
-    # 🧪 データの前処理・スコア化
-    # ==================================================
-    positive_words = ["美味しい", "おいしい", "旨い", "うまい", "絶品", "味がいい", "スープが優秀", "麺がうまい", "激ウマ", "美味すぎる", "最高", "リピート"]
-
-    def calculate_delicious_score(text):
-        if pd.isna(text) or len(str(text)) == 0:
-            return 0.0
-        text_str = str(text)
-        count = 0
-        for word in positive_words:
-            count += text_str.count(word)
-        raw_score = (count / len(text_str)) * 500
-        adjusted_score = min(100.0, max(30.0, 30.0 + raw_score * 10))
-        return round(adjusted_score, 1)
-
-    @st.cache_data(show_spinner=False)
-    def generate_gpt_summary(shop_name, text, kw_list):
-        if client is None:
-            return "（APIキーが設定されていないため要約をスキップしました）"
-        if pd.isna(text) or len(str(text).strip()) == 0:
-            return "口コミデータがありません。"
-        
-        keywords_str = "、".join(kw_list)
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "あなたは優秀なグルメレビュアーです。提供されたラーメン店の口コミ群から、そのお店の味、特徴、雰囲気を客観的に分析し、300文字程度（最大320文字）の綺麗な日本語の要約文を作成してください。"},
-                    {"role": "user", "content": f"店舗名: {shop_name}\n特に注目してほしい検索キーワード: {keywords_str}\n\n口コミデータ:\n{str(text)[:2000]}"}
-                ],
-                max_tokens=400,
-                temperature=0.7
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            return f"❌ 要約生成エラー: {e}"
-
-    df["おいしさスコア"] = df["すべての口コミ"].apply(calculate_delicious_score)
-    
-    def detect_city(address):
-        address_str = str(address)
-        if "習志野" in address_str:
-            return "習志野市"
-        elif "船橋" in address_str:
-            return "船橋市"
-        else:
-            return "その他エリア"
-
-    df["所属市区町村"] = df["住所"].apply(detect_city)
-    target_df = df[df["所属市区町村"].isin(["習志野市", "船橋市"])].copy()
-
-    # ==================================================
-    # 🗺️ グラフ表示セクション
-    # ==================================================
-    st.header("🗺️ 市別のラーメンポジショニングマップ")
-    
-    analysis_mode = st.radio(
-        "表示するエリアを選択してください：",
-        ["習志野市と船橋市を比較する", "習志野市のみ表示", "船橋市のみ表示"],
-        horizontal=True
-    )
-
-    if analysis_mode == "習志野市のみ表示":
-        plot_df = target_df[target_df["所属市区町村"] == "習志野市"]
-        color_column = None
-        title_text = "【習志野市】 ラーメンポジショニングマップ"
-    elif analysis_mode == "船橋市のみ表示":
-        plot_df = target_df[target_df["所属市区町村"] == "船橋市"]
-        color_column = None
-        title_text = "【船橋市】 ラーメンポジショニングマップ"
-    else:
-        plot_df = target_df
-        color_column = "所属市区町村"
-        title_text = "【習志野市 vs 船橋市】 ラーメン市場ポジショニング比較"
-
-    if len(plot_df) > 0:
-        fig = px.scatter(
-            plot_df,
-            x="価格",           
-            y="おいしさスコア",
-            color=color_column,
-            hover_name="店名",
-            hover_data=["住所"],
-            range_x=[600, 1400],       
-            range_y=[25, 105],         
-            title=title_text,
-            labels={"価格": "ラーメン1杯の推定価格（円）", "おいしさスコア": "おいしさ熱量スコア（味ポジティブ度）"}
-        )
-        
-        fig.update_traces(marker=dict(size=16, opacity=0.85, line=dict(width=1.5, color='DarkSlateGrey')))
-        fig.update_layout(
-            plot_bgcolor="#f9f9f9",
-            xaxis=dict(showgrid=True, gridcolor="#e0e0e0"),
-            yaxis=dict(showgrid=True, gridcolor="#e0e0e0", dtick=10) 
-        )
-            
-        st.plotly_chart(fig, use_container_width=True)
-        st.write(f"💡 現在画面に表示されている店舗数: **{len(plot_df)} 店舗**")
-    else:
-        st.warning("選択されたエリアのデータがCSV内に見つかりませんでした。")
-
-    st.markdown("---")
-
-    # ==================================================
-    # 🔍 キーワード検索・店舗一覧
-    # ==================================================
-    st.header("🔍 特定キーワードの密度・口コミ検索")
-    keyword_input = st.text_input("調べたい特徴を入力（例：津田沼 濃厚、家系）", "")
-
-    if keyword_input:
-        cleaned_input = keyword_input.replace(" ", " ").replace("、", " ").replace(",", " ")
-        keywords = cleaned_input.split()
-
-        if keywords:
-            search_df = plot_df.copy()
-            for kw in keywords:
-                search_df = search_df[search_df["すべての口コミ"].str.contains(kw, na=False)]
-
-            hit_shops = len(search_df)
-            display_keywords = " ＋ ".join(keywords)
-
-            st.subheader(f"📊 「{display_keywords}」の出現傾向")
-            if hit_shops > 0:
-                st.info(f"選択中のエリア内で **{hit_shops} 店舗** がヒットしました。")
-                
-                sorted_search_df = search_df.sort_values(by="おいしさスコア", ascending=False)
-                
-                for index, row in sorted_search_df.iterrows():
-                    label_text = f"【おいしさ: {row['おいしさスコア']:.1f}点】 📍 {row['店名']} （{row['所属市区町村']}）"
-                    
-                    with st.expander(label_text):
-                        st.caption(f"住所: {row['住所']}")
-                        st.write(f"💰 **価格:** {row['価格']} 円")
-                        
-                        # ChatGPTによる300字要約
-                        with st.spinner("AIが口コミを分析して要約中..."):
-                            raw_summary = generate_gpt_summary(row["店名"], row["すべての口コミ"], keywords)
-                        
-                        highlighted_summary = raw_summary
-                        for kw in keywords:
-                            highlighted_summary = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", highlighted_summary)
-                            
-                        st.markdown("---")
-                        st.markdown("**📝 【ChatGPTによる300字AI特徴要約】**")
-                        st.components.v1.html(f"<div style='color: #333333; font-size: 14px; line-height: 1.6; font-family: sans-serif;'>{highlighted_summary}</div>", height=120, scrolling=True)
-                        
-                        st.markdown("---")
-                        st.markdown("**📜 【実際の口コミ（1件ずつ個別に表示・キーワード強調）】**")
-                        
-                        # 💡 改行コードで文章を分割して、1件ずつのリストにする処理を追加
-                        raw_reviews = str(row["すべての口コミ"]).split("\n")
-                        # 空白の行は除外して、有効な口コミだけを絞り込む
-                        clean_reviews = [r.strip() for r in raw_reviews if r.strip()]
-                        
-                        # 各口コミを吹き出し風のHTMLボックスに変形して合体させる
-                        html_reviews_list = []
-                        for idx, review in enumerate(clean_reviews):
-                            # キーワード強調処理
-                            highlighted_review = review
-                            for kw in keywords:
-                                highlighted_review = re.sub(re.escape(kw), f"<mark style='background-color: #ffeb3b; color: #000000; font-weight: bold;'>{kw}</mark>", highlighted_review)
-                            
-                            # 1件ごとの枠のHTMLスタイルを設定
-                            box_html = f"""
-                            <div style="background-color: #f7f9fa; border-left: 5px solid #ff9800; padding: 12px; margin-bottom: 12px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); color: #333333; line-height: 1.6;">
-                                <span style="font-size: 11px; color: #888888; font-weight: bold; display: block; margin-bottom: 4px;">👤 口コミユーザー {idx+1}</span>
-                                {highlighted_review}
-                            </div>
-                            """
-                            html_reviews_list.append(box_html)
-                        
-                        # すべての口コミボックスを統合
-                        all_boxes_html = "".join(html_reviews_list)
-                        
-                        # スクロール可能な大枠の中に入れる
-                        html_container = f"""
-                        <div style="background-color: #ffffff; padding: 10px; border: 1px solid #dddddd; border-radius: 8px; height: 300px; overflow-y: auto; font-family: sans-serif; font-size: 13.5px;">
-                            {all_boxes_html}
-                        </div>
-                        """
-                        # 表示枠の高さを少し広げて（230px→330px）見やすく調整
-                        st.components.v1.html(html_container, height=330, scrolling=True)
-            else:
-                st.warning("該当する店舗は見つかりませんでした。")
-# 💡 app.py の下部に追加する「学生街ラーメンの特性割合分析」
-st.header("📊 千葉・学生街ラーメンの3要素割合分析")
-st.write("大学・専門学校の半径500m圏内にある店舗の『一番人気メニュー』をAIが分析した統計データです。")
+st.header("📊 学生街ラーメンの3要素割合分析")
+st.write("各学校周辺の店舗の『一番人気メニュー』から抽出した、味の濃さ・スープの種類・麺の太さのデータです。")
 
 try:
+    # 収集した学生街ラーメンのCSVを読み込み
     univ_df = pd.read_csv("chiba_univ_ramen.csv")
     total_univ_shops = len(univ_df)
     
-    st.info(f"🎓 対象の学校周辺でヒットした合計ラーメン店舗数: **{total_univ_shops} 店舗**")
+    st.info(f"🎓 対象の学校周辺でヒットした合計ラーメン専門店数: **{total_univ_shops} 店舗**")
 
     if total_univ_shops > 0:
+        # 画面を3列に分割して円グラフを横並びにする
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.subheader("💧 味の濃さの割合")
-            # 味の濃さの出現数をカウントしてパーセンテージ化
+            st.subheader("💧 味の濃さ")
             density_counts = univ_df["味の濃さ"].value_counts().reset_index()
             density_counts.columns = ["味の濃さ", "店舗数"]
             fig1 = px.pie(density_counts, values="店舗数", names="味の濃さ", hole=0.3, color_discrete_sequence=px.colors.sequential.RdBu)
             st.plotly_chart(fig1, use_container_width=True)
 
         with col2:
-            st.subheader("🍜 ラーメン種類の割合")
+            st.subheader("🍜 スープの種類")
             type_counts = univ_df["種類"].value_counts().reset_index()
             type_counts.columns = ["種類", "店舗数"]
             fig2 = px.pie(type_counts, values="店舗数", names="種類", hole=0.3, color_discrete_sequence=px.colors.sequential.Agsunset)
             st.plotly_chart(fig2, use_container_width=True)
 
         with col3:
-            st.subheader("🥢 麺の太さの割合")
+            st.subheader("🥢 麺の太さ")
             thickness_counts = univ_df["麺の太さ"].value_counts().reset_index()
             thickness_counts.columns = ["麺の太さ", "店舗数"]
             fig3 = px.pie(thickness_counts, values="店舗数", names="麺の太さ", hole=0.3, color_discrete_sequence=px.colors.sequential.YlOrBr)
             st.plotly_chart(fig3, use_container_width=True)
+
+        # 💡 論文や発表スライドにコピペしやすいよう、データの一覧表も下部に表示します
+        st.markdown("---")
+        st.header("📋 対象店舗データ一覧")
+        st.write("分析対象となった店舗の具体的な一覧です（最寄り学校別）。")
+        
+        # 実際の口コミは長すぎて表が見づらくなるため、除外して表示
+        display_df = univ_df[["最寄り学校", "店名", "住所", "一番人気", "味の濃さ", "種類", "麺の太さ"]]
+        st.dataframe(display_df, use_container_width=True)
+
+    else:
+        st.warning("⚠️ 'chiba_univ_ramen.csv' 内に有効な店舗データが含まれていません。データ収集スクリプトを再実行してください。")
             
 except FileNotFoundError:
-    st.warning("⚠️ 'chiba_univ_ramen.csv' がまだリポジトリ内にありません。Colabで生成したデータをアップロードしてください。")
+    st.warning("⚠️ 'chiba_univ_ramen.csv' が見つかりません。自動収集スクリプトを実行してCSVデータをリポジトリにアップロードしてください。")
